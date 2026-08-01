@@ -63,7 +63,13 @@ def canonicalize_payload(data):
 
 
 def load_allowed_issuers():
-    raw_value = os.getenv("VERIFIER_ALLOWED_ISSUERS", "")
+    raw_value = ""
+
+    if hasattr(st, "secrets") and "VERIFIER_ALLOWED_ISSUERS" in st.secrets:
+        raw_value = str(st.secrets["VERIFIER_ALLOWED_ISSUERS"])
+    else:
+        raw_value = os.getenv("VERIFIER_ALLOWED_ISSUERS", "")
+
     if not raw_value:
         return None
     return {value.strip() for value in raw_value.split(",") if value.strip()}
@@ -112,8 +118,6 @@ def verify_payload(payload):
     st.success("✅ Signature verified successfully.")
     if is_trusted_issuer:
         st.info("This credential is authentic and was signed by a trusted issuer identified by the provided did:key.")
-    else:
-        st.info("This credential is authentic, but the issuer DID is not in the configured allow-list for this verifier deployment.")
 
     with st.expander("Certificate details", expanded=True):
         st.json(certificate_data)
