@@ -88,6 +88,56 @@ class DidKeyVerifierTests(unittest.TestCase):
 
         self.assertEqual(issuers, {"did:key:one", "did:key:two"})
 
+    def test_load_allowed_issuers_falls_back_when_streamlit_secrets_missing(self):
+        class MissingSecrets:
+            def __contains__(self, key):
+                raise RuntimeError("secrets not configured")
+
+        self.verifier.st.secrets = MissingSecrets()
+
+        issuers = self.verifier.load_allowed_issuers()
+
+        self.assertIsNone(issuers)
+
+    def test_verify_payload_skips_details_for_untrusted_issuer(self):
+        private_key = ed25519.Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        public_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        did_key_bytes = b"\xed\x01" + public_bytes
+        did = "did:key:z" + base58.b58encode(did_key_bytes).decode("ascii")
+
+        certificate_data = {"recipient": "Ada Lovelace", "certificateType": "volunteer"}
+        payload = self.verifier.canonicalize_payload(certificate_data)
+        signature = private_key.sign(payload)
+
+        calls = []
+
+        def warning(message, *args, **kwargs):
+            calls.append(("warning", message))
+
+        def expander(*args, **kwargs):
+            calls.append(("expander", args[0]))
+            return Dummy()
+
+        self.verifier.st.warning = warning
+        self.verifier.st.expander = expander
+        self.verifier.st.secrets = {"VERIFIER_ALLOWED_ISSUERS": "did:key:another"}
+
+        bundle = {
+            "certificate": certificate_data,
+            "issuer_did": did,
+            "signature_hex": signature.hex(),
+        }
+
+        self.verifier.verify_payload(bundle)
+
+        self.assertEqual(calls[0][0], "warning")
+        self.assertEqual(calls[0][1], "⚠️ The signature is valid, but the issuer is not in the configured allowlist.")
+        self.assertFalse(any(call[0] == "expander" for call in calls))
+
 
 if __name__ == "__main__":
     unittest.main()
