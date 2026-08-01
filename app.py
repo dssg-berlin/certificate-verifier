@@ -115,8 +115,8 @@ def verify_payload(payload):
     allowed_issuers = load_allowed_issuers()
     is_trusted_issuer = allowed_issuers is None or issuer_did in allowed_issuers
 
-    st.success("✅ Signature verified successfully.")
     if is_trusted_issuer:
+        st.success("✅ Signature verified successfully.")
         st.info("This credential is authentic and was signed by a trusted issuer identified by the provided did:key.")
 
     with st.expander("Certificate details", expanded=True):
