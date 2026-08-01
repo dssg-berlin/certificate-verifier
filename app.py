@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import urllib.parse
 
 import base58
@@ -61,6 +62,13 @@ def canonicalize_payload(data):
     return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
+def load_allowed_issuers():
+    raw_value = os.getenv("VERIFIER_ALLOWED_ISSUERS", "")
+    if not raw_value:
+        return None
+    return {value.strip() for value in raw_value.split(",") if value.strip()}
+
+
 def extract_bundle(payload):
     if not isinstance(payload, dict):
         raise ValueError("The uploaded file must contain a JSON object.")
@@ -98,14 +106,25 @@ def verify_payload(payload):
 
     public_key.verify(signature_value, serialized_data)
 
+    allowed_issuers = load_allowed_issuers()
+    is_trusted_issuer = allowed_issuers is None or issuer_did in allowed_issuers
+
     st.success("✅ Signature verified successfully.")
-    st.info("This credential is authentic and was signed by the issuer identified by the provided did:key.")
+    if is_trusted_issuer:
+        st.info("This credential is authentic and was signed by a trusted issuer identified by the provided did:key.")
+    else:
+        st.info("This credential is authentic, but the issuer DID is not in the configured allow-list for this verifier deployment.")
 
     with st.expander("Certificate details", expanded=True):
         st.json(certificate_data)
 
     with st.expander("Verification metadata", expanded=False):
-        st.write({"issuer_did": issuer_did, "signature_hex": payload.get("signature_hex") or payload.get("signature")})
+        st.write({
+            "issuer_did": issuer_did,
+            "signature_hex": payload.get("signature_hex") or payload.get("signature"),
+            "trusted_issuer": is_trusted_issuer,
+            "allowed_issuers": sorted(allowed_issuers) if allowed_issuers is not None else None,
+        })
 
 
 uploaded_file = st.file_uploader(
