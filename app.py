@@ -116,31 +116,28 @@ def verify_payload(payload):
     public_key.verify(signature_value, serialized_data)
 
     allowed_issuers = load_allowed_issuers()
-    is_trusted_issuer = allowed_issuers is None or issuer_did in allowed_issuers
+
+    if allowed_issuers is None:
+        st.warning("⚠️ No trusted issuer allowlist is configured on the server. Signature verification is not trusted by policy.")
+        return
+
+    is_trusted_issuer = issuer_did in allowed_issuers
 
     if not is_trusted_issuer:
         st.warning("⚠️ The signature is valid, but the issuer is not in the configured allowlist.")
         return
 
     st.success("✅ Signature verified successfully.")
-    st.info("This credential is authentic and was signed by a trusted issuer identified by the provided did:key.")
+    st.info("This credential is authentic and was signed by a trusted issuer.")
 
     with st.expander("Certificate details", expanded=True):
         st.json(certificate_data)
-
-    with st.expander("Verification metadata", expanded=False):
-        st.write({
-            "issuer_did": issuer_did,
-            "signature_hex": payload.get("signature_hex") or payload.get("signature"),
-            "trusted_issuer": is_trusted_issuer,
-            "allowed_issuers": sorted(allowed_issuers) if allowed_issuers is not None else None,
-        })
 
 
 uploaded_file = st.file_uploader(
     "Upload a certificate JSON file",
     type=["json"],
-    help="Expected structure: {\"certificate\": {...}, \"issuer_did\": \"did:key:z...\", \"signature_hex\": \"...\"}",
+    help="Expected structure: {\"certificate\": {...}, \"issuer_did\": \"<issuer DID>\", \"signature_hex\": \"<signature>\"}",
 )
 
 query_params = st.query_params

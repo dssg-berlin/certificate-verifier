@@ -55,9 +55,17 @@ class DidKeyVerifierTests(unittest.TestCase):
         cls.verifier = _load_verifier_module()
 
     def test_resolve_public_key_from_did_supports_multibase_prefix(self):
-        did = "did:key:z6MkjzdWcToRce1Ewz6VyYT6rYAW8pAVJYFKt3Z2n8zP5uzP"
-        public_key = self.verifier.resolve_public_key_from_did(did)
-        self.assertIsNotNone(public_key)
+        private_key = ed25519.Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        public_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        did_key_bytes = b"\xed\x01" + public_bytes
+        did = "did:key:z" + base58.b58encode(did_key_bytes).decode("ascii")
+
+        resolved_public_key = self.verifier.resolve_public_key_from_did(did)
+        self.assertIsNotNone(resolved_public_key)
 
     def test_verify_payload_accepts_generator_style_bundle(self):
         private_key = ed25519.Ed25519PrivateKey.generate()
@@ -137,6 +145,99 @@ class DidKeyVerifierTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "warning")
         self.assertEqual(calls[0][1], "⚠️ The signature is valid, but the issuer is not in the configured allowlist.")
         self.assertFalse(any(call[0] == "expander" for call in calls))
+
+    def test_verify_payload_requires_allowlist_configuration_to_report_trusted_issuer(self):
+        private_key = ed25519.Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        public_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        did_key_bytes = b"\xed\x01" + public_bytes
+        did = "did:key:z" + base58.b58encode(did_key_bytes).decode("ascii")
+
+        certificate_data = {"recipient": "Ada Lovelace", "certificateType": "volunteer"}
+        payload = self.verifier.canonicalize_payload(certificate_data)
+        signature = private_key.sign(payload)
+
+        calls = []
+
+        def success(message, *args, **kwargs):
+            calls.append(("success", message))
+
+        def warning(message, *args, **kwargs):
+            calls.append(("warning", message))
+
+        def expander(*args, **kwargs):
+            calls.append(("expander", args[0]))
+            return Dummy()
+
+        self.verifier.st.success = success
+        self.verifier.st.warning = warning
+        self.verifier.st.expander = expander
+        self.verifier.st.secrets = {}
+        self.verifier.os.environ = {}
+
+        bundle = {
+            "certificate": certificate_data,
+            "issuer_did": did,
+            "signature_hex": signature.hex(),
+        }
+
+        self.verifier.verify_payload(bundle)
+
+        self.assertFalse(any(call[0] == "success" for call in calls))
+        self.assertTrue(any(call[0] == "warning" and "allowlist" in call[1] for call in calls))
+        self.assertFalse(any(call[0] == "expander" for call in calls))
+
+    def test_verify_payload_does_not_surface_issuer_did_or_signature_in_ui(self):
+        private_key = ed25519.Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        public_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        did_key_bytes = b"\xed\x01" + public_bytes
+        did = "did:key:z" + base58.b58encode(did_key_bytes).decode("ascii")
+
+        certificate_data = {"recipient": "Ada Lovelace", "certificateType": "volunteer"}
+        payload = self.verifier.canonicalize_payload(certificate_data)
+        signature = private_key.sign(payload)
+
+        calls = []
+
+        def success(message, *args, **kwargs):
+            calls.append(("success", message))
+
+        def info(message, *args, **kwargs):
+            calls.append(("info", message))
+
+        def expander(*args, **kwargs):
+            calls.append(("expander", args[0]))
+            return Dummy()
+
+        def json_write(data, *args, **kwargs):
+            calls.append(("json", data))
+
+        self.verifier.st.success = success
+        self.verifier.st.info = info
+        self.verifier.st.expander = expander
+        self.verifier.st.json = json_write
+        self.verifier.st.secrets = {"VERIFIER_ALLOWED_ISSUERS": did}
+        self.verifier.os.environ = {}
+
+        bundle = {
+            "certificate": certificate_data,
+            "issuer_did": did,
+            "signature_hex": signature.hex(),
+        }
+
+        self.verifier.verify_payload(bundle)
+
+        self.assertEqual(calls[0][0], "success")
+        self.assertTrue(any(call[0] == "expander" and call[1] == "Certificate details" for call in calls))
+        self.assertFalse(any(call[0] == "expander" and call[1] == "Verification metadata" for call in calls))
+        self.assertFalse(any(call[0] == "json" and isinstance(call[1], dict) and "issuer_did" in call[1] for call in calls))
 
 
 if __name__ == "__main__":
