@@ -38,6 +38,7 @@ def _load_verifier_module():
     streamlit_stub.expander = lambda *args, **kwargs: Dummy()
     streamlit_stub.file_uploader = lambda *args, **kwargs: None
     streamlit_stub.query_params = {}
+    streamlit_stub.secrets = {}
 
     sys.modules["streamlit"] = streamlit_stub
 
@@ -79,6 +80,13 @@ class DidKeyVerifierTests(unittest.TestCase):
         }
 
         self.verifier.verify_payload(bundle)
+
+    def test_load_allowed_issuers_reads_streamlit_secrets(self):
+        self.verifier.st.secrets = {"VERIFIER_ALLOWED_ISSUERS": "did:key:one, did:key:two"}
+
+        issuers = self.verifier.load_allowed_issuers()
+
+        self.assertEqual(issuers, {"did:key:one", "did:key:two"})
 
 
 if __name__ == "__main__":
